@@ -1,0 +1,29 @@
+[package]
+name = "mk1-firmware"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+
+# ponytail: standalone crate, not a root-workspace member — esp-idf needs its
+# own target/toolchain/build-std config that would infect the host crates.
+[workspace]
+
+[[bin]]
+name = "mk1-firmware"
+harness = false
+
+[dependencies]
+anyhow = "1"
+log = "0.4"
+esp-idf-svc = "0.51"
+mk1-protocol = { path = "../crates/mk1-protocol" }
+
+[build-dependencies]
+embuild = "0.33"
+
+[profile.release]
+opt-level = "s"
+
+[profile.dev]
+debug = true
+opt-level = "z"
