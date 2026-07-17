@@ -7,6 +7,7 @@
 //! Usage: mk1-bridge [target-ip] [--dump]
 
 use std::net::UdpSocket;
+use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -28,9 +29,13 @@ struct Mk1 {
 
 impl Mk1 {
     fn open() -> rusb::Result<Self> {
-        let handle = rusb::open_device_with_vid_pid(mk1::VENDOR_ID, mk1::PRODUCT_ID)
+        let mut handle = rusb::open_device_with_vid_pid(mk1::VENDOR_ID, mk1::PRODUCT_ID)
             .ok_or(rusb::Error::NoDevice)?;
         handle.set_auto_detach_kernel_driver(true)?;
+        // Clean slate — the firmware wedges if a previous session died mid-command.
+        if let Err(e) = handle.reset() {
+            eprintln!("device reset: {e} (continuing)");
+        }
         handle.claim_interface(mk1::INTERFACE)?;
         handle.set_alternate_setting(mk1::INTERFACE, mk1::ALT_SETTING)?;
         Ok(Mk1 { handle })
@@ -44,22 +49,6 @@ impl Mk1 {
     fn write_display(&self, msg: &[u8]) -> rusb::Result<()> {
         self.handle.write_bulk(mk1::EP_DISPLAY_OUT, msg, USB_TIMEOUT)?;
         Ok(())
-    }
-
-    fn handshake(&self) -> rusb::Result<mk1::DeviceInfo> {
-        self.write_ep1(&mk1::get_device_info())?;
-        let mut buf = [0u8; mk1::EP1_BUFSIZE];
-        for _ in 0..20 {
-            let n = match self.handle.read_bulk(mk1::EP_COMMAND_IN, &mut buf, USB_TIMEOUT) {
-                Ok(n) => n,
-                Err(rusb::Error::Timeout) => continue,
-                Err(e) => return Err(e),
-            };
-            if let Some(Ep1Message::DeviceInfo(info)) = Ep1Message::parse(&buf[..n]) {
-                return Ok(info);
-            }
-        }
-        Err(rusb::Error::Timeout)
     }
 }
 
@@ -134,17 +123,89 @@ fn main() {
         .unwrap_or_else(|| "192.168.1.137".into());
 
     let dev = Arc::new(Mk1::open().expect("open Maschine Mk1 (is it plugged in? permissions?)"));
-    let info = dev.handshake().expect("device info handshake");
+    let leds = Arc::new(Mutex::new(LedState::new()));
+    let sock = UdpSocket::bind("0.0.0.0:0").expect("bind OSC out socket");
+    let out = move |sock: &UdpSocket, name: &str, v: f32| {
+        let _ = sock.send_to(&osc(&format!("/maschine/{name}"), v), (target.as_str(), OSC_OUT_PORT));
+        if dump {
+            println!("{name:20} {v:.3}");
+        }
+    };
+
+    // EP1 IN must be drained continuously from the start (the kernel driver
+    // keeps a read pending at all times; the firmware wedges otherwise).
+    // This thread owns all EP1-IN traffic: handshake reply, knobs, buttons,
+    // DIN MIDI in.
+    let (info_tx, info_rx) = mpsc::channel();
+    {
+        let (dev, leds, sock) = (dev.clone(), leds.clone(), sock.try_clone().unwrap());
+        let out = out.clone();
+        std::thread::spawn(move || {
+            let mut knobs: Option<[u16; 11]> = None;
+            let mut buttons = ButtonStates::default();
+            let mut buf = [0u8; mk1::EP1_BUFSIZE];
+            loop {
+                let n = match dev.handle.read_bulk(mk1::EP_COMMAND_IN, &mut buf, USB_TIMEOUT) {
+                    Ok(n) => n,
+                    Err(rusb::Error::Timeout) => continue,
+                    Err(e) => {
+                        eprintln!("EP1 read failed: {e}");
+                        break;
+                    }
+                };
+                match Ep1Message::parse(&buf[..n]) {
+                    Some(Ep1Message::DeviceInfo(info)) => {
+                        let _ = info_tx.send(info);
+                    }
+                    Some(Ep1Message::Knobs(now)) => {
+                        let first = knobs.is_none();
+                        let prev = knobs.unwrap_or(now);
+                        for (i, knob) in mk1::input::Knob::ALL.iter().enumerate() {
+                            if now[i] != prev[i] || first {
+                                out(&sock, knob.name(), now[i] as f32 / 999.0);
+                            }
+                        }
+                        knobs = Some(now);
+                    }
+                    Some(Ep1Message::Buttons(now)) => {
+                        let mut l = leds.lock().unwrap();
+                        for (b, pressed) in now.diff(buttons) {
+                            out(&sock, &format!("button/{}", b.name()), pressed as u8 as f32);
+                            if let Some(led) = Led::for_button(b) {
+                                l.set(led, if pressed { MAX_BRIGHTNESS } else { 0 });
+                            }
+                        }
+                        flush_leds(&dev, &mut l);
+                        buttons = now;
+                    }
+                    Some(Ep1Message::Midi { port, data }) => {
+                        println!("DIN MIDI in (port {port}): {data:02x?}");
+                    }
+                    _ => {}
+                }
+            }
+        });
+    }
+
+    // Handshake: ask for device info until the reader hands us the reply.
+    let mut info = None;
+    for _ in 0..5 {
+        let _ = dev.write_ep1(&mk1::get_device_info());
+        if let Ok(i) = info_rx.recv_timeout(Duration::from_secs(2)) {
+            info = Some(i);
+            break;
+        }
+    }
+    let info = info.expect("device info handshake");
     println!(
         "Maschine Mk1: firmware {}, {} MIDI in / {} out",
         info.fw_version, info.num_midi_in, info.num_midi_out
     );
 
-    // Enable input streaming first — cheap EP1 traffic while the device is idle.
+    // Enable input streaming.
     write_ep1_retry(&dev, &mk1::auto_msg(1, 10, 5)).expect("auto_msg");
 
     // LEDs: hello sweep, then backlight on.
-    let leds = Arc::new(Mutex::new(LedState::new()));
     {
         let mut l = leds.lock().unwrap();
         l.set_all(MAX_BRIGHTNESS);
@@ -155,7 +216,7 @@ fn main() {
         flush_leds(&dev, &mut l);
     }
 
-    // Displays last: full frames stall the device firmware briefly.
+    // Displays: full frames stall the device firmware briefly, so last.
     let (mut left, mut right) = (Display::new(), Display::new());
     test_pattern(&mut left, &mut right);
     for (i, d) in [&left, &right].into_iter().enumerate() {
@@ -167,14 +228,6 @@ fn main() {
         std::thread::sleep(Duration::from_millis(100)); // let the panel settle
     }
     println!("displays initialized (gradient left, checkerboard right)");
-
-    let sock = UdpSocket::bind("0.0.0.0:0").expect("bind OSC out socket");
-    let out = move |sock: &UdpSocket, name: &str, v: f32| {
-        let _ = sock.send_to(&osc(&format!("/maschine/{name}"), v), (target.as_str(), OSC_OUT_PORT));
-        if dump {
-            println!("{name:20} {v:.3}");
-        }
-    };
 
     // Pads: EP 0x84 stream, echo pressure to pad LEDs.
     {
@@ -209,62 +262,17 @@ fn main() {
         });
     }
 
-    // LEDs over OSC: /maschine/led/<name> <0..1> on :9001.
-    {
-        let (dev, leds) = (dev.clone(), leds.clone());
-        std::thread::spawn(move || {
-            let sock = UdpSocket::bind(("0.0.0.0", OSC_IN_PORT)).expect("bind OSC LED port");
-            let mut buf = [0u8; 512];
-            while let Ok((n, _)) = sock.recv_from(&mut buf) {
-                let Some((addr, v)) = osc_decode(&buf[..n]) else { continue };
-                let Some(name) = addr.strip_prefix("/maschine/led/") else { continue };
-                if let Some(led) = led_by_name(name) {
-                    let mut l = leds.lock().unwrap();
-                    l.set(led, (v.clamp(0.0, 1.0) * MAX_BRIGHTNESS as f32) as u8);
-                    flush_leds(&dev, &mut l);
-                }
-            }
-        });
-    }
-
-    // Knobs, buttons, DIN MIDI in: EP 0x81, on the main thread.
-    let mut knobs: Option<[u16; 11]> = None;
-    let mut buttons = ButtonStates::default();
-    let mut buf = [0u8; mk1::EP1_BUFSIZE];
-    loop {
-        let n = match dev.handle.read_bulk(mk1::EP_COMMAND_IN, &mut buf, USB_TIMEOUT) {
-            Ok(n) => n,
-            Err(rusb::Error::Timeout) => continue,
-            Err(e) => {
-                eprintln!("EP1 read failed: {e}");
-                break;
-            }
-        };
-        match Ep1Message::parse(&buf[..n]) {
-            Some(Ep1Message::Knobs(now)) => {
-                let prev = knobs.unwrap_or(now);
-                for (i, knob) in mk1::input::Knob::ALL.iter().enumerate() {
-                    if now[i] != prev[i] || knobs.is_none() {
-                        out(&sock, knob.name(), now[i] as f32 / 999.0);
-                    }
-                }
-                knobs = Some(now);
-            }
-            Some(Ep1Message::Buttons(now)) => {
-                let mut l = leds.lock().unwrap();
-                for (b, pressed) in now.diff(buttons) {
-                    out(&sock, &format!("button/{}", b.name()), pressed as u8 as f32);
-                    if let Some(led) = Led::for_button(b) {
-                        l.set(led, if pressed { MAX_BRIGHTNESS } else { 0 });
-                    }
-                }
-                flush_leds(&dev, &mut l);
-                buttons = now;
-            }
-            Some(Ep1Message::Midi { port, data }) => {
-                println!("DIN MIDI in (port {port}): {data:02x?}");
-            }
-            _ => {}
+    // LEDs over OSC: /maschine/led/<name> <0..1> on :9001, main thread.
+    let osc_in = UdpSocket::bind(("0.0.0.0", OSC_IN_PORT)).expect("bind OSC LED port");
+    println!("ready: OSC out :{OSC_OUT_PORT}, LEDs in :{OSC_IN_PORT}");
+    let mut buf = [0u8; 512];
+    while let Ok((n, _)) = osc_in.recv_from(&mut buf) {
+        let Some((addr, v)) = osc_decode(&buf[..n]) else { continue };
+        let Some(name) = addr.strip_prefix("/maschine/led/") else { continue };
+        if let Some(led) = led_by_name(name) {
+            let mut l = leds.lock().unwrap();
+            l.set(led, (v.clamp(0.0, 1.0) * MAX_BRIGHTNESS as f32) as u8);
+            flush_leds(&dev, &mut l);
         }
     }
 }
