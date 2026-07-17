@@ -136,8 +136,9 @@ pub enum Button {
     GroupD = 20, GroupC = 21, GroupB = 22, GroupA = 23,
     Control = 24, Browse = 25, Left = 26, Snap = 27, AutoWrite = 28,
     Right = 29, Sampling = 30, Step = 31,
-    Softkey1 = 32, Softkey2 = 33, Softkey3 = 34, Softkey4 = 35,
-    Softkey5 = 36, Softkey6 = 37, Softkey7 = 38, Softkey8 = 39,
+    // softkey bits run right-to-left (verified on hardware; matches cabl)
+    Softkey8 = 32, Softkey7 = 33, Softkey6 = 34, Softkey5 = 35,
+    Softkey4 = 36, Softkey3 = 37, Softkey2 = 38, Softkey1 = 39,
     NoteRepeat = 40, Play = 41,
 }
 
@@ -262,13 +263,20 @@ impl<'a> Ep1Message<'a> {
     }
 }
 
-/// Parse an EP 0x84 pad report: yields (pad 0–15, pressure 0–4095).
+/// Parse an EP 0x84 pad report: yields (raw pad id 0–15, pressure 0–4095).
 /// Words are self-identifying; the same pad may appear more than once.
 pub fn parse_pads(buf: &[u8]) -> impl Iterator<Item = (u8, u16)> + '_ {
     buf.chunks_exact(2).map(|c| {
         let v = u16::from_le_bytes([c[0], c[1]]);
         ((v >> 12) as u8, v & 0xfff)
     })
+}
+
+/// Raw pad ids run row-major from the TOP-left; the numbers printed on the
+/// unit start at the BOTTOM-left (verified on hardware). Returns 1–16.
+pub fn pad_number(raw: u8) -> u8 {
+    let raw = raw % 16;
+    (3 - raw / 4) * 4 + raw % 4 + 1
 }
 
 #[cfg(test)]
@@ -284,6 +292,14 @@ mod tests {
                 assert!(decode_erp(a, b) < 1000);
             }
         }
+    }
+
+    #[test]
+    fn pad_numbering_top_left_raw() {
+        assert_eq!(pad_number(0), 13); // raw 0 = top-left = printed 13
+        assert_eq!(pad_number(3), 16);
+        assert_eq!(pad_number(12), 1); // bottom-left = printed 1
+        assert_eq!(pad_number(15), 4);
     }
 
     #[test]

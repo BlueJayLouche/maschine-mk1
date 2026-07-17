@@ -41,8 +41,11 @@ byte first.
 ## Pads (EP 0x84)
 
 Reports are a sequence of little-endian u16 words (≥ 32 bytes):
-`word >> 12` = pad index 0–15, `word & 0xfff` = pressure 0–4095.
-Pads are self-identifying; don't assume position. Kernel deadzone: 5.
+`word >> 12` = raw pad id 0–15, `word & 0xfff` = pressure 0–4095.
+Pads are self-identifying; don't assume position. **Raw ids run row-major from
+the top-left; the numbers printed on the unit start at the bottom-left**
+(raw 0 = printed 13, raw 12 = printed 1 — verified on hardware).
+Kernel deadzone: 5.
 cabl ignores reports whose first byte is 2 (collision with encoder turns) and
 uses a press threshold of 200/4095.
 
@@ -67,7 +70,8 @@ peaks −7/268).
 7 scene, 8 (reserved), 9 rec, 10 erase, 11 shift, 12 grid, 13 step_right,
 14 step_left, 15 restart, 16–23 group E F G H D C B A, 24 control, 25 browse,
 26 left, 27 snap, 28 autowrite, 29 right, 30 sampling, 31 step,
-32–39 softkey 1–8, 40 note_repeat, 41 play.
+32–39 softkey **8–1** (right-to-left, verified on hardware), 40 note_repeat,
+41 play.
 
 ## LEDs
 

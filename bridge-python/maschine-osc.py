@@ -39,7 +39,9 @@ AXES = {ecodes.ABS_HAT0X + i: (f"knob/{i + 1}", 999) for i in range(8)}
 AXES[ecodes.ABS_RX] = ("volume", 999)
 AXES[ecodes.ABS_RY] = ("tempo", 999)
 AXES[ecodes.ABS_RZ] = ("swing", 999)
-AXES.update({ecodes.ABS_PRESSURE + i: (f"pad/{i + 1}", 4095) for i in range(16)})
+# raw pad ids run row-major from the top-left; printed numbers start bottom-left
+AXES.update({ecodes.ABS_PRESSURE + i: (f"pad/{(3 - i // 4) * 4 + i % 4 + 1}", 4095)
+             for i in range(16)})
 
 # ALSA HWDEP control numids on card 2 (amixer -c 2 controls), brightness 0..63.
 LEDS = {f"pad/{i}": i for i in range(1, 17)}

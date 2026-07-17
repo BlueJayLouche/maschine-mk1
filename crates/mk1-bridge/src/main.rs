@@ -29,7 +29,7 @@ struct Mk1 {
 
 impl Mk1 {
     fn open() -> rusb::Result<Self> {
-        let mut handle = rusb::open_device_with_vid_pid(mk1::VENDOR_ID, mk1::PRODUCT_ID)
+        let handle = rusb::open_device_with_vid_pid(mk1::VENDOR_ID, mk1::PRODUCT_ID)
             .ok_or(rusb::Error::NoDevice)?;
         handle.set_auto_detach_kernel_driver(true)?;
         // Clean slate — the firmware wedges if a previous session died mid-command.
@@ -246,16 +246,17 @@ fn main() {
                     }
                 };
                 let mut l = leds.lock().unwrap();
-                for (pad, pressure) in mk1::input::parse_pads(&buf[..n]) {
-                    let pad = pad as usize % 16;
+                for (raw, pressure) in mk1::input::parse_pads(&buf[..n]) {
+                    let raw = raw as usize % 16;
+                    let phys = mk1::input::pad_number(raw as u8) as usize; // printed 1–16
                     // kernel-style deadzone, quantized to cut event spam
                     let p = if pressure < 6 { 0 } else { pressure };
-                    if p.abs_diff(last[pad]) < 32 && !(p == 0 && last[pad] != 0) {
+                    if p.abs_diff(last[raw]) < 32 && !(p == 0 && last[raw] != 0) {
                         continue;
                     }
-                    last[pad] = p;
-                    out(&sock, &format!("pad/{}", pad + 1), p as f32 / 4095.0);
-                    l.set(Led::pad(pad), (p >> 6) as u8);
+                    last[raw] = p;
+                    out(&sock, &format!("pad/{phys}"), p as f32 / 4095.0);
+                    l.set(Led::pad(phys - 1), (p >> 6) as u8);
                 }
                 flush_leds(&dev, &mut l);
             }
