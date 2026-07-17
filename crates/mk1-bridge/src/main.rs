@@ -18,7 +18,9 @@ use rusb::{DeviceHandle, GlobalContext};
 
 const OSC_OUT_PORT: u16 = 9000;
 const OSC_IN_PORT: u16 = 9001;
-const USB_TIMEOUT: Duration = Duration::from_millis(250);
+// The device firmware stalls EP1 handling while it blits full display frames;
+// be generous and retry rather than panic.
+const USB_TIMEOUT: Duration = Duration::from_millis(1000);
 
 struct Mk1 {
     handle: DeviceHandle<GlobalContext>,
@@ -92,9 +94,21 @@ fn led_by_name(name: &str) -> Option<Led> {
         .and_then(|&b| Led::for_button(b))
 }
 
+fn write_ep1_retry(dev: &Mk1, msg: &[u8]) -> rusb::Result<()> {
+    let mut last = Ok(());
+    for _ in 0..3 {
+        last = dev.write_ep1(msg);
+        match last {
+            Err(rusb::Error::Timeout) => std::thread::sleep(Duration::from_millis(50)),
+            _ => return last,
+        }
+    }
+    last
+}
+
 fn flush_leds(dev: &Mk1, leds: &mut LedState) {
     for frame in leds.frames() {
-        if let Err(e) = dev.write_ep1(&frame) {
+        if let Err(e) = write_ep1_retry(dev, &frame) {
             eprintln!("LED write failed: {e}");
         }
     }
@@ -126,17 +140,8 @@ fn main() {
         info.fw_version, info.num_midi_in, info.num_midi_out
     );
 
-    // Displays: init both, then show a test pattern.
-    let (mut left, mut right) = (Display::new(), Display::new());
-    test_pattern(&mut left, &mut right);
-    for (i, d) in [&left, &right].into_iter().enumerate() {
-        mk1::display::init_display(i as u8, |m| dev.write_display(m), |ms| {
-            std::thread::sleep(Duration::from_millis(ms as u64))
-        })
-        .expect("display init");
-        d.send_frame(i as u8, |m| dev.write_display(m)).expect("display frame");
-    }
-    println!("displays initialized (gradient left, checkerboard right)");
+    // Enable input streaming first — cheap EP1 traffic while the device is idle.
+    write_ep1_retry(&dev, &mk1::auto_msg(1, 10, 5)).expect("auto_msg");
 
     // LEDs: hello sweep, then backlight on.
     let leds = Arc::new(Mutex::new(LedState::new()));
@@ -150,8 +155,18 @@ fn main() {
         flush_leds(&dev, &mut l);
     }
 
-    // Enable input streaming.
-    dev.write_ep1(&mk1::auto_msg(1, 10, 5)).expect("auto_msg");
+    // Displays last: full frames stall the device firmware briefly.
+    let (mut left, mut right) = (Display::new(), Display::new());
+    test_pattern(&mut left, &mut right);
+    for (i, d) in [&left, &right].into_iter().enumerate() {
+        mk1::display::init_display(i as u8, |m| dev.write_display(m), |ms| {
+            std::thread::sleep(Duration::from_millis(ms as u64))
+        })
+        .expect("display init");
+        d.send_frame(i as u8, |m| dev.write_display(m)).expect("display frame");
+        std::thread::sleep(Duration::from_millis(100)); // let the panel settle
+    }
+    println!("displays initialized (gradient left, checkerboard right)");
 
     let sock = UdpSocket::bind("0.0.0.0:0").expect("bind OSC out socket");
     let out = move |sock: &UdpSocket, name: &str, v: f32| {
