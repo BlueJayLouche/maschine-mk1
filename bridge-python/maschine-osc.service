@@ -1,0 +1,12 @@
+[Unit]
+Description=Maschine Mk1 OSC bridge
+After=network-online.target sound.target
+
+[Service]
+User=alarm
+ExecStart=/usr/bin/python -u /home/alarm/maschine/maschine-osc.py
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

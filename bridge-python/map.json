@@ -1,0 +1,10 @@
+{
+  "knob/1": ["/rustjay/motion/intensity", 0, 1],
+  "knob/2": ["/rustjay/motion/red_gain", -2, 2],
+  "knob/3": ["/rustjay/motion/green_gain", -2, 2],
+  "knob/4": ["/rustjay/motion/blue_gain", -2, 2],
+  "knob/5": ["/rustjay/motion/input_mix", 0, 1],
+  "knob/6": ["/rustjay/motion/trail_fade", 0, 1],
+  "knob/7": ["/rustjay/motion/threshold", 0, 1],
+  "knob/8": ["/rustjay/motion/smoothing", 0, 1]
+}

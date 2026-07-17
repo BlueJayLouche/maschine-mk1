@@ -1,0 +1,9 @@
+[package]
+name = "mk1-protocol"
+description = "no_std protocol codecs for the NI Maschine Mk1 controller (USB 17cc:0808)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
