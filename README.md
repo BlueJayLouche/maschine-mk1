@@ -42,8 +42,16 @@ cargo build --release -p mk1-bridge
 sudo ./target/release/mk1-bridge <target-ip> --dump   # sudo or a udev rule
 ```
 
-The bridge detaches the kernel driver while it runs; the kernel driver rebinds
-after exit (replug the USB cable if it doesn't). Wired instrument-grade output
+The bridge detaches the kernel driver while it runs. To hand the device back
+to `snd-usb-caiaq` afterwards, a plain rebind is often not enough — the
+firmware wedges if a session died mid-command. Known-good recovery (or just
+replug the cable):
+
+```sh
+sudo python -c "import fcntl,os; fcntl.ioctl(os.open('/dev/bus/usb/001/%03d' \
+  % int(open('/sys/bus/usb/devices/<port>/devnum').read()), os.O_WRONLY), 21780, 0)"
+sudo modprobe -r snd_usb_caiaq && sudo modprobe snd_usb_caiaq
+``` Wired instrument-grade output
 is available through the unit's own rear DIN MIDI jacks — pad timing over WiFi
 OSC is best-effort.
 
