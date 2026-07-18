@@ -411,6 +411,18 @@ fn display_test(rx: &mpsc::Receiver<bool>) {
     }
 }
 
+/// Whether the Mk1 session has received at least one button report and both
+/// `a` and `b` are currently held. Used for the boot-time Shift+MIDI
+/// (Shift+Control) escape hatch into portal mode — false, not an error, if
+/// the session hasn't come up yet (device not plugged in, still enumerating).
+pub fn buttons_held(a: mk1::input::Button, b: mk1::input::Button) -> bool {
+    if !SESSION_UP.load(Ordering::SeqCst) {
+        return false;
+    }
+    let s = unsafe { &*core::ptr::addr_of!(SESSION) };
+    s.buttons.pressed(a) && s.buttons.pressed(b)
+}
+
 /// Returns the sender for host-driven LED writes (drained in the client
 /// thread, which owns all session state).
 pub fn start() -> anyhow::Result<mpsc::SyncSender<(mk1::leds::Led, u8)>> {

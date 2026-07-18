@@ -33,8 +33,27 @@ fn main() -> anyhow::Result<()> {
         sysloop,
     )?;
 
-    match Config::load(nvs.clone())? {
-        Some(cfg) => match join_sta(&mut wifi, &cfg) {
+    // Escape hatch: hold Shift+MIDI (Shift+Control in the kernel/cabl naming
+    // — silkscreened "MIDI" on the unit) through the first couple of button
+    // reports at boot to force portal mode even with a saved, working
+    // config. Poll rather than a fixed sleep so a Mk1 that's slower to
+    // enumerate still gets a fair, bounded window.
+    let mut force_portal = false;
+    for _ in 0..20 {
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        if usb::buttons_held(mk1_protocol::input::Button::Shift, mk1_protocol::input::Button::Control) {
+            force_portal = true;
+            break;
+        }
+    }
+    if force_portal {
+        log::info!("Shift+MIDI held at boot — forcing setup portal");
+    }
+
+    match (force_portal, Config::load(nvs.clone())?) {
+        (true, _) => portal::run(&mut wifi, nvs),
+        (false, None) => portal::run(&mut wifi, nvs),
+        (false, Some(cfg)) => match join_sta(&mut wifi, &cfg) {
             Ok(()) => {
                 log::info!("on {}, OSC target {}:{}", cfg.ssid, cfg.target_ip, cfg.target_port);
                 osc::start(&cfg.target_ip, cfg.target_port, led_tx)?;
@@ -47,7 +66,6 @@ fn main() -> anyhow::Result<()> {
                 portal::run(&mut wifi, nvs)
             }
         },
-        None => portal::run(&mut wifi, nvs),
     }
 }
 
