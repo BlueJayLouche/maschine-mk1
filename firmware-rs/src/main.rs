@@ -4,6 +4,7 @@
 //! docs/design.md).
 
 mod config;
+mod osc;
 mod portal;
 mod usb;
 
@@ -25,7 +26,7 @@ fn main() -> anyhow::Result<()> {
     let nvs = EspDefaultNvsPartition::take()?;
 
     // Mk1 session runs regardless of WiFi/portal state.
-    usb::start()?;
+    let led_tx = usb::start()?;
 
     let mut wifi = BlockingWifi::wrap(
         EspWifi::new(peripherals.modem, sysloop.clone(), Some(nvs.clone()))?,
@@ -35,15 +36,8 @@ fn main() -> anyhow::Result<()> {
     match Config::load(nvs.clone())? {
         Some(cfg) => match join_sta(&mut wifi, &cfg) {
             Ok(()) => {
-                log::info!(
-                    "on {}, OSC target {}:{} — waiting for Maschine {:04x}:{:04x}",
-                    cfg.ssid,
-                    cfg.target_ip,
-                    cfg.target_port,
-                    mk1_protocol::VENDOR_ID,
-                    mk1_protocol::PRODUCT_ID,
-                );
-                // USB host session + OSC bridge land here next.
+                log::info!("on {}, OSC target {}:{}", cfg.ssid, cfg.target_ip, cfg.target_port);
+                osc::start(&cfg.target_ip, cfg.target_port, led_tx)?;
                 loop {
                     std::thread::sleep(std::time::Duration::from_secs(60));
                 }

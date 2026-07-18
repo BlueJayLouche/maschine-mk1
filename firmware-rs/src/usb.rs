@@ -58,12 +58,15 @@ struct Session {
     knobs: [Option<u16>; 11],
     buttons: mk1::input::ButtonStates,
     pads: [u16; 16],
+    /// Last pressure sent over OSC per pad (finer gate than the log's).
+    pads_sent: [u16; 16],
 }
 static mut SESSION: Session = Session {
     leds: mk1::leds::LedState::new(),
     knobs: [None; 11],
     buttons: mk1::input::ButtonStates(0),
     pads: [0; 16],
+    pads_sent: [0; 16],
 };
 
 unsafe fn ep1_pump() {
@@ -147,6 +150,7 @@ unsafe fn handle_ep1(buf: &[u8]) {
                     if (v as i32 - prev as i32).unsigned_abs() > 4 {
                         log::info!("{} = {}", knob.name(), v);
                         s.knobs[i] = Some(v);
+                        crate::osc::publish(crate::osc::Event::Knob(i, v));
                     }
                 } else {
                     s.knobs[i] = Some(v);
@@ -156,6 +160,7 @@ unsafe fn handle_ep1(buf: &[u8]) {
         Some(mk1::input::Ep1Message::Buttons(now)) => {
             for (b, down) in now.diff(s.buttons) {
                 log::info!("button {} {}", b.name(), if down { "down" } else { "up" });
+                crate::osc::publish(crate::osc::Event::Button(b, down));
             }
             s.buttons = now;
         }
@@ -180,6 +185,11 @@ unsafe extern "C" fn ep4_in_cb(t: *mut usb_transfer_t) {
             if pressure.abs_diff(prev) >= 128 || (pressure == 0 && prev != 0) {
                 log::info!("pad {} pressure {}", printed, pressure);
                 s.pads[raw as usize] = pressure;
+            }
+            let sent = s.pads_sent[raw as usize];
+            if pressure.abs_diff(sent) >= 16 || (pressure == 0 && sent != 0) {
+                s.pads_sent[raw as usize] = pressure;
+                crate::osc::publish(crate::osc::Event::Pad(raw, pressure));
             }
             s.leds
                 .set(mk1::leds::Led::pad(printed as usize - 1), (pressure >> 6) as u8);
@@ -357,10 +367,12 @@ fn ep8_write(msg: &[u8], rx: &mpsc::Receiver<bool>) -> Result<(), ()> {
 }
 
 fn display_test(rx: &mpsc::Receiver<bool>) {
-    // The device stalls EP1 while blitting — send display traffic last.
-    std::thread::sleep(std::time::Duration::from_millis(500));
+    // The device stalls EP1 while blitting — send display traffic last, and
+    // give the panels generous settle time (init too early = noise).
+    std::thread::sleep(std::time::Duration::from_millis(1500));
     let mut disp = mk1::display::Display::new();
     for (screen, invert) in [(0u8, false), (1u8, true)] {
+        std::thread::sleep(std::time::Duration::from_millis(800));
         let ok = mk1::display::init_display(
             screen,
             |m| ep8_write(m, rx),
@@ -383,7 +395,10 @@ fn display_test(rx: &mpsc::Receiver<bool>) {
     }
 }
 
-pub fn start() -> anyhow::Result<()> {
+/// Returns the sender for host-driven LED writes (drained in the client
+/// thread, which owns all session state).
+pub fn start() -> anyhow::Result<mpsc::SyncSender<(mk1::leds::Led, u8)>> {
+    let (led_tx, led_rx) = mpsc::sync_channel::<(mk1::leds::Led, u8)>(64);
     unsafe {
         let host_cfg = usb_host_config_t {
             intr_flags: ESP_INTR_FLAG_LEVEL1 as i32,
@@ -424,7 +439,7 @@ pub fn start() -> anyhow::Result<()> {
     std::thread::Builder::new()
         .name("mk1-usb".into())
         .stack_size(8192)
-        .spawn(|| unsafe {
+        .spawn(move || unsafe {
             let client_cfg = usb_host_client_config_t {
                 is_synchronous: false,
                 max_num_event_msg: 8,
@@ -445,6 +460,16 @@ pub fn start() -> anyhow::Result<()> {
                 // 10ms tick: EP 0x08 completions dispatch from here, and the
                 // display blit is one blocking write per message.
                 usb_host_client_handle_events(CLIENT, 10);
+                if SESSION_UP.load(Ordering::SeqCst) {
+                    let mut any = false;
+                    while let Ok((led, b)) = led_rx.try_recv() {
+                        (*core::ptr::addr_of_mut!(SESSION)).leds.set(led, b);
+                        any = true;
+                    }
+                    if any {
+                        led_flush();
+                    }
+                }
                 let addr = NEW_ADDR.swap(0, Ordering::SeqCst);
                 if addr != 0 && DEV.is_null() {
                     if usb_host_device_open(CLIENT, addr, core::ptr::addr_of_mut!(DEV)) != ESP_OK {
@@ -468,5 +493,5 @@ pub fn start() -> anyhow::Result<()> {
             }
         })?;
 
-    Ok(())
+    Ok(led_tx)
 }

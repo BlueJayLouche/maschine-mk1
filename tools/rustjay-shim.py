@@ -16,7 +16,7 @@ import struct
 import sys
 import threading
 
-PI_LED = ("192.168.1.240", 9001)
+CONTROLLER_LED_PORT = 9001  # LEDs go back to whoever last sent controls
 VP404 = ("127.0.0.1", 9002)
 CONTROL_PORT = 9000
 FEEDBACK_PORT = 9101
@@ -40,6 +40,7 @@ LED_MAP = {f"/rustjay/pads/pad{i}_loaded": f"pad/{i + 1}" for i in range(16)}
 LED_MAP["/rustjay/transport/rec_state"] = "rec"
 
 loaded = [0.0] * 16  # last known pad<i>_loaded, for post-release repaint
+ctrl_peer = [None]  # ip of the last controls sender (Pi bridge or ESP32)
 
 
 def pad4(b: bytes) -> bytes:
@@ -83,15 +84,17 @@ def main() -> None:
                 continue  # sync dumps every param; we only relay LED sources
             if led.startswith("pad/"):
                 loaded[int(led[4:]) - 1] = val
-            out.sendto(osc_f(f"/maschine/led/{led}", val), PI_LED)
+            if ctrl_peer[0]:
+                out.sendto(osc_f(f"/maschine/led/{led}", val), (ctrl_peer[0], CONTROLLER_LED_PORT))
             print(f"led  {led:8s} <- {addr} = {val:.2f}")
 
     threading.Thread(target=feedback_loop, daemon=True).start()
     sync()
-    print(f"shim up: :{CONTROL_PORT} -> {VP404}, feedback :{FEEDBACK_PORT} -> {PI_LED}")
+    print(f"shim up: :{CONTROL_PORT} -> {VP404}, feedback :{FEEDBACK_PORT} -> controller:{CONTROLLER_LED_PORT}")
 
     while True:
-        data, _ = ctrl.recvfrom(1536)
+        data, peer = ctrl.recvfrom(1536)
+        ctrl_peer[0] = peer[0]
         try:
             addr, val = osc_decode(data)
         except (UnicodeDecodeError, struct.error):
@@ -111,8 +114,9 @@ def main() -> None:
             if loaded[n - 1] > 0.0:
                 threading.Timer(
                     0.15,
-                    lambda n=n: out.sendto(
-                        osc_f(f"/maschine/led/pad/{n}", loaded[n - 1]), PI_LED
+                    lambda n=n: ctrl_peer[0] and out.sendto(
+                        osc_f(f"/maschine/led/pad/{n}", loaded[n - 1]),
+                        (ctrl_peer[0], CONTROLLER_LED_PORT),
                     ),
                 ).start()
 
