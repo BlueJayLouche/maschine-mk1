@@ -77,8 +77,12 @@ switches flash a brief bank-letter overlay even over host content.
 ## Profiles
 
 - **8 slots**, one JSON file each on a flash data partition; sparse per-control
-  map `{osc, midi {ch, type, num}, label}` + `name`, `target`, flags. Missing
-  entries use generated defaults. Active slot persists in NVS.
+  map `{osc, midi {ch, type, num}, label, led_source}` + `name`, `target`,
+  flags. Missing entries use generated defaults. Active slot persists in NVS.
+- `led_source` binds a control's LED to an incoming feedback address: rustjay's
+  `osc-feedback` channel pushes registered param values on change (plus a full
+  dump on `/rustjay/sync`), and a matching address drives the LED float 0–1.
+  E.g. vp404 publishes `pad<i>_loaded` and `rec_state` params for exactly this.
 - Switch: **hold shift + group button**; group LEDs show profiles while shift
   is held.
 - Editing: device web page — download/upload/paste profile JSON, name + target
