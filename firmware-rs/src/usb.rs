@@ -60,6 +60,14 @@ struct Session {
     pads: [u16; 16],
     /// Last pressure sent over OSC per pad (finer gate than the log's).
     pads_sent: [u16; 16],
+    /// Host-driven pad LED brightness (e.g. vp404's pad-loaded indicator),
+    /// indexed by printed pad number - 1. The pad stream reports all 16
+    /// pads' pressure every cycle, including idle ones at 0 — restore this
+    /// base value on release instead of forcing the LED dark, or a host
+    /// "loaded" light gets stomped within milliseconds of being set.
+    pad_led_base: [u8; 16],
+    /// Currently pressed (pressure > 0), indexed by printed pad number - 1.
+    pad_touched: [bool; 16],
 }
 static mut SESSION: Session = Session {
     leds: mk1::leds::LedState::new(),
@@ -67,6 +75,8 @@ static mut SESSION: Session = Session {
     buttons: mk1::input::ButtonStates(0),
     pads: [0; 16],
     pads_sent: [0; 16],
+    pad_led_base: [0; 16],
+    pad_touched: [false; 16],
 };
 
 unsafe fn ep1_pump() {
@@ -191,8 +201,14 @@ unsafe extern "C" fn ep4_in_cb(t: *mut usb_transfer_t) {
                 s.pads_sent[raw as usize] = pressure;
                 crate::osc::publish(crate::osc::Event::Pad(raw, pressure));
             }
-            s.leds
-                .set(mk1::leds::Led::pad(printed as usize - 1), (pressure >> 6) as u8);
+            let idx = printed as usize - 1;
+            s.pad_touched[idx] = pressure > 0;
+            let echo = if pressure > 0 {
+                (pressure >> 6) as u8
+            } else {
+                s.pad_led_base[idx]
+            };
+            s.leds.set(mk1::leds::Led::pad(idx), echo);
         }
         led_flush();
     }
@@ -422,6 +438,7 @@ pub fn start() -> anyhow::Result<mpsc::SyncSender<(mk1::leds::Led, u8)>> {
 
     let (tx, rx) = mpsc::sync_channel(1);
     EP8_DONE.set(tx).ok();
+    let backlight_tx = led_tx.clone();
     std::thread::Builder::new()
         .name("mk1-disp".into())
         .stack_size(16384)
@@ -430,9 +447,18 @@ pub fn start() -> anyhow::Result<mpsc::SyncSender<(mk1::leds::Led, u8)>> {
                 std::thread::sleep(std::time::Duration::from_millis(100));
             }
             display_test(&rx);
-            // once per session; wait for a re-attach
+            // Something repeatedly turns the backlight back off after it's
+            // set (hardware-verified: it flashes on then goes solid black,
+            // even after a post-display-init reassert) — the mechanism is
+            // unconfirmed (a one-shot channel drop was ruled out by retrying;
+            // suspect the display driver's own power sequencing clobbers it
+            // asynchronously, after the host sees the last blit ACKed).
+            // ponytail: don't chase the root cause blind — just keep winning
+            // the fight. Reassert every 2s for the life of the session; a
+            // stray EP1 message that often is free.
             while SESSION_UP.load(Ordering::SeqCst) {
-                std::thread::sleep(std::time::Duration::from_millis(500));
+                let _ = backlight_tx.try_send((mk1::leds::Led::Backlight, 0x2e));
+                std::thread::sleep(std::time::Duration::from_millis(2000));
             }
         })?;
 
@@ -463,7 +489,19 @@ pub fn start() -> anyhow::Result<mpsc::SyncSender<(mk1::leds::Led, u8)>> {
                 if SESSION_UP.load(Ordering::SeqCst) {
                     let mut any = false;
                     while let Ok((led, b)) = led_rx.try_recv() {
-                        (*core::ptr::addr_of_mut!(SESSION)).leds.set(led, b);
+                        let s = &mut *core::ptr::addr_of_mut!(SESSION);
+                        match (0..16).find(|&i| led == mk1::leds::Led::pad(i)) {
+                            // Pad LED: remember as the at-rest brightness; only
+                            // show it now if the pad isn't mid-press (otherwise
+                            // it takes effect on release, see ep4_in_cb).
+                            Some(i) => {
+                                s.pad_led_base[i] = b;
+                                if !s.pad_touched[i] {
+                                    s.leds.set(led, b);
+                                }
+                            }
+                            None => s.leds.set(led, b),
+                        }
                         any = true;
                     }
                     if any {

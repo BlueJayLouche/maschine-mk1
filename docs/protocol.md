@@ -132,6 +132,31 @@ NI never implemented other-speed descriptors. In reality:
   format, smaller chunks. Full-frame blit ≈ 300 ms per panel; live UIs should
   use row/column windows for partial updates.
 
+### Open issue: backlight goes dark and stays dark (unresolved 2026-07-18)
+
+`display backlight` (LED position 59, same EP1 DIMM_LEDS command as every
+other LED) is set right after the device-info hello and works — briefly.
+Hardware-verified behavior: it visibly flashes on at that point, then goes
+solid black and **stays off**, surviving even a reassert sent every 2 seconds
+for the rest of the session (`firmware-rs/src/usb.rs`, the `mk1-disp` thread's
+backlight loop). Ruled out: a one-shot channel drop (retried up to 20× before
+moving to the periodic reassert — same result), and pad-LED echo (that logic
+only touches pad positions 0–15, never 59).
+
+Leading theory, unconfirmed: the panel init sequence's power-management
+commands (candidates: `0xAF`, `0x25` — un-glossed in the cabl-derived byte
+sequence, see `INIT_COMMANDS` in `mk1-protocol/src/display.rs`) put the
+display driver chip into a state that gates the backlight rail at the
+hardware level, independent of the EP1 LED command's logical value — and
+does so repeatedly/continuously, not just once at init. Untested: whether
+the backlight recovers if display init is skipped entirely (would confirm
+or kill the theory outright); whether *any* value from the LED command
+reaches it at all once this state begins (vs. reaching it but being
+overridden downstream). Next session: add a log line at the point the
+reassert actually flushes to EP1 (not just when it's queued) and correlate
+its timestamp against when the panel visibly goes dark, ideally with the
+init sequence's power commands isolated/commented out one at a time.
+
 ## Power
 
 The unit is USB bus-powered; budget ≥ 500 mA at 5 V with backlight and LEDs lit.
