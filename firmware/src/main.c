@@ -14,6 +14,7 @@
 #include "freertos/task.h"
 #include "esp_log.h"
 #include "usb/usb_host.h"
+#include "usb/usb_helpers.h"
 
 static const char *TAG = "mk1";
 
@@ -256,7 +257,40 @@ static void attach_mk1(void)
     ep4_in->num_bytes = 512;
     ep4_in->callback = ep4_in_cb;
 
-    ESP_ERROR_CHECK(usb_host_interface_claim(client, dev, 0, 1));
+    /* At full speed the Mk1 may present a different config descriptor than
+     * the high-speed layout in docs/protocol.md (512-byte bulk EPs are
+     * illegal at FS) — dump what it actually offers before claiming. */
+    const usb_config_desc_t *cfg;
+    if (usb_host_get_active_config_descriptor(dev, &cfg) == ESP_OK) {
+        usb_print_config_descriptor(cfg, NULL);
+        /* FS fallback: the Mk1 serves its HS descriptors verbatim — 512-byte
+         * bulk MPS is illegal at full speed and the DWC host rejects it. The
+         * wire MPS at FS is 64 by physics, so patch the host's cached
+         * descriptor (it's RAM, read from the device at enumeration) so the
+         * claim/pipe-alloc paths see the truth. */
+        int off = 0;
+        const usb_standard_desc_t *d = (const usb_standard_desc_t *)cfg;
+        while ((d = usb_parse_next_descriptor_of_type(
+                    d, cfg->wTotalLength, USB_B_DESCRIPTOR_TYPE_ENDPOINT, &off)) != NULL) {
+            usb_ep_desc_t *ep = (usb_ep_desc_t *)d;
+            if (ep->wMaxPacketSize > 64) {
+                ESP_LOGW(TAG, "clamping EP 0x%02x MPS %d -> 64",
+                         ep->bEndpointAddress, ep->wMaxPacketSize);
+                ep->wMaxPacketSize = 64;
+            }
+        }
+    }
+
+    esp_err_t err = usb_host_interface_claim(client, dev, 0, 1);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "claim iface 0 alt 1: %s — trying alt 0", esp_err_to_name(err));
+        err = usb_host_interface_claim(client, dev, 0, 0);
+    }
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "claim iface 0 alt 0 also failed: %s — descriptor above is the clue",
+                 esp_err_to_name(err));
+        return;
+    }
 
     /* SET_INTERFACE(0, alt 1) — claim alone doesn't send it */
     usb_setup_packet_t *s = (usb_setup_packet_t *)ctrl->data_buffer;

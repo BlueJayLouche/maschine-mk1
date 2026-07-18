@@ -107,6 +107,22 @@ with the listed delays after them:
 85 × 3 px = 255), then the buffer as: `[d, 0x01, 0xF7, 0x5C, data[0..502]]`,
 20 × `[d|1, 0x01, 0xF6, data[n..n+502]]`, `[d|1, 0x01, 0x52, data[10542..10880]]`.
 
+## Full-speed behaviour (hardware-verified on ESP32-S3, 2026-07-18)
+
+The Mk1 enumerates on a full-speed-only host but serves a **truncated,
+spec-illegal config descriptor**: one interface, alt setting 0 only (no alt 1),
+just EP 0x01/0x81 — and both still claim `wMaxPacketSize 512`, illegal at FS.
+NI never implemented other-speed descriptors. In reality:
+
+- Clamp the host-side MPS to 64 (the FS wire maximum) and EP1 works fine —
+  EP1 messages are ≤ 64 bytes anyway.
+- `SET_INTERFACE(0, alt 1)` is **accepted** despite alt 1 being undescribed,
+  and the full EP1 session runs: GET_DEVICE_INFO, AUTO_MSG, knob/button
+  reports, LEDs.
+- EP 0x84 (pads) and EP 0x08 (displays) are absent from the FS descriptor;
+  whether the device still serves them on the wire is untested — a host-stack
+  patch is needed to open pipes on undescribed endpoints.
+
 ## Power
 
 The unit is USB bus-powered; budget ≥ 500 mA at 5 V with backlight and LEDs lit.
