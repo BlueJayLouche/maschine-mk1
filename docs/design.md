@@ -74,6 +74,14 @@ zooms its cell (last-touched overlay, ~1 s decay). Host takeover is per-screen
 via the text/bitmap OSC protocol until released or profile change; bank
 switches flash a brief bank-letter overlay even over host content.
 
+**Latency constraint (settled 2026-07-18):** the Mk1 stalls EP1 (knob/button
+reports) while a display blit is in flight, so the renderer is
+partial-window-updates-only from day one: dirty cells via row/column windows,
+any single burst capped at ~2 EP 0x08 messages, and display traffic yields
+while input was active in the last ~100 ms. Full-frame blits are init/idle
+only. Fallback if this still measurably regresses the latency baseline: a
+freeze-screens-while-playing flag.
+
 ## Profiles
 
 - **8 slots**, one JSON file each on a flash data partition; sparse per-control
@@ -87,6 +95,16 @@ switches flash a brief bank-letter overlay even over host content.
   is held.
 - Editing: device web page — download/upload/paste profile JSON, name + target
   as form fields. No graphical mapping editor in v1.
+- Implemented 2026-07-18 (`firmware-rs`: profile.rs/osc.rs/web.rs), with two
+  notes: slots live as NVS blobs (`p0`–`p7`, ≤3 KB JSON each) rather than files
+  on a dedicated partition — same flash, no partition-table change; revisit if
+  a profile outgrows the cap. `midi` and `label` entries are stored and served
+  back but not yet emitted/rendered (DIN MIDI plumbing and screens are their
+  own work items). Profile JSON also carries optional `target` ("ip:port"
+  override) and `sync` (feedback registration address, sent every 5 s with the
+  LED port 9001 as int arg — rustjay's `/rustjay/sync`). The web page is
+  paste/download JSON per slot (name/target ride in the JSON, not form fields).
+  `tools/vp404-profile.json` is the starter profile that retired the shim.
 
 ## Onboarding
 
@@ -94,6 +112,20 @@ Unconfigured (or STA join fails): WPA2 AP `maschine-XXXX` (password
 `maschine`), DNS catch-all + captive portal serving exactly WiFi credentials +
 OSC target. Configured: joins the LAN, same web server (+ profiles page);
 mDNS `maschine.local` arrives with the profiles page, not the portal.
+
+## Latency (settled 2026-07-18)
+
+Doctrine: **protect, don't chase**. Target ≤10 ms p50 / ≤20 ms p99
+controller-attributable (pad hit → OSC at the host, Mac AWDL down) — already
+met: measured RTT median 7.3 ms (`tools/osc-rtt.py`, `/maschine/ping` echo on
+:9001), and the tail was proven Mac-side (identical tail Mac→router with no
+controller involved; fix is `sudo ifconfig awdl0 down` or Ethernet). The
+regression guard is the osc-rtt RTT — the only component firmware can
+regress; run it before/after nontrivial changes. Non-goals until a measured
+symptom appears: core pinning, thread priorities, FreeRTOS tick rate,
+AUTO_MSG rate tweaks (kernel-proven values; the budget is radio-dominated).
+WiFi power save stays off (`esp_wifi_set_ps(WIFI_PS_NONE)`); no per-event
+info-level logging on input paths.
 
 ## Host-side work queue (rustjay repo)
 

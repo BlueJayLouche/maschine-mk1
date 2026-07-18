@@ -3,7 +3,7 @@
 
 use esp_idf_svc::nvs::{EspDefaultNvsPartition, EspNvs};
 
-const NAMESPACE: &str = "mk1";
+pub const NAMESPACE: &str = "mk1";
 
 pub struct Config {
     pub ssid: String,

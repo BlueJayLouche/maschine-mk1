@@ -1,0 +1,98 @@
+{
+ "name": "vp404",
+ "sync": "/rustjay/sync",
+ "map": {
+  "a/knob/1": {
+   "osc": "/rustjay/pad/in_point"
+  },
+  "a/knob/2": {
+   "osc": "/rustjay/pad/out_point"
+  },
+  "button/rec": {
+   "osc": "/rustjay/transport/record",
+   "led_source": "/rustjay/transport/rec_state"
+  },
+  "button/erase": {
+   "osc": "/rustjay/transport/erase"
+  },
+  "button/play": {
+   "osc": "/rustjay/transport/seq_play"
+  },
+  "button/step": {
+   "osc": "/rustjay/transport/step_record"
+  },
+  "button/note_repeat": {
+   "osc": "/rustjay/transport/retrigger"
+  },
+  "button/step_right": {
+   "osc": "/rustjay/transport/pattern_next"
+  },
+  "button/step_left": {
+   "osc": "/rustjay/transport/pattern_prev"
+  },
+  "a/pad/1": {
+   "osc": "/rustjay/pads/pad0_trig",
+   "led_source": "/rustjay/pads/pad0_loaded"
+  },
+  "a/pad/2": {
+   "osc": "/rustjay/pads/pad1_trig",
+   "led_source": "/rustjay/pads/pad1_loaded"
+  },
+  "a/pad/3": {
+   "osc": "/rustjay/pads/pad2_trig",
+   "led_source": "/rustjay/pads/pad2_loaded"
+  },
+  "a/pad/4": {
+   "osc": "/rustjay/pads/pad3_trig",
+   "led_source": "/rustjay/pads/pad3_loaded"
+  },
+  "a/pad/5": {
+   "osc": "/rustjay/pads/pad4_trig",
+   "led_source": "/rustjay/pads/pad4_loaded"
+  },
+  "a/pad/6": {
+   "osc": "/rustjay/pads/pad5_trig",
+   "led_source": "/rustjay/pads/pad5_loaded"
+  },
+  "a/pad/7": {
+   "osc": "/rustjay/pads/pad6_trig",
+   "led_source": "/rustjay/pads/pad6_loaded"
+  },
+  "a/pad/8": {
+   "osc": "/rustjay/pads/pad7_trig",
+   "led_source": "/rustjay/pads/pad7_loaded"
+  },
+  "a/pad/9": {
+   "osc": "/rustjay/pads/pad8_trig",
+   "led_source": "/rustjay/pads/pad8_loaded"
+  },
+  "a/pad/10": {
+   "osc": "/rustjay/pads/pad9_trig",
+   "led_source": "/rustjay/pads/pad9_loaded"
+  },
+  "a/pad/11": {
+   "osc": "/rustjay/pads/pad10_trig",
+   "led_source": "/rustjay/pads/pad10_loaded"
+  },
+  "a/pad/12": {
+   "osc": "/rustjay/pads/pad11_trig",
+   "led_source": "/rustjay/pads/pad11_loaded"
+  },
+  "a/pad/13": {
+   "osc": "/rustjay/pads/pad12_trig",
+   "led_source": "/rustjay/pads/pad12_loaded"
+  },
+  "a/pad/14": {
+   "osc": "/rustjay/pads/pad13_trig",
+   "led_source": "/rustjay/pads/pad13_loaded"
+  },
+  "a/pad/15": {
+   "osc": "/rustjay/pads/pad14_trig",
+   "led_source": "/rustjay/pads/pad14_loaded"
+  },
+  "a/pad/16": {
+   "osc": "/rustjay/pads/pad15_trig",
+   "led_source": "/rustjay/pads/pad15_loaded"
+  }
+ }
+}

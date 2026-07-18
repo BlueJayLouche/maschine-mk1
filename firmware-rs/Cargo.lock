@@ -904,6 +904,8 @@ dependencies = [
  "esp-idf-svc",
  "log",
  "mk1-protocol",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

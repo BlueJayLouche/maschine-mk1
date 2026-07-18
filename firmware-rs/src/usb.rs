@@ -158,7 +158,7 @@ unsafe fn handle_ep1(buf: &[u8]) {
                 let v = vals[i];
                 if let Some(prev) = s.knobs[i] {
                     if (v as i32 - prev as i32).unsigned_abs() > 4 {
-                        log::info!("{} = {}", knob.name(), v);
+                        log::debug!("{} = {}", knob.name(), v);
                         s.knobs[i] = Some(v);
                         crate::osc::publish(crate::osc::Event::Knob(i, v));
                     }
@@ -169,7 +169,7 @@ unsafe fn handle_ep1(buf: &[u8]) {
         }
         Some(mk1::input::Ep1Message::Buttons(now)) => {
             for (b, down) in now.diff(s.buttons) {
-                log::info!("button {} {}", b.name(), if down { "down" } else { "up" });
+                log::debug!("button {} {}", b.name(), if down { "down" } else { "up" });
                 crate::osc::publish(crate::osc::Event::Button(b, down));
             }
             s.buttons = now;
@@ -193,7 +193,9 @@ unsafe extern "C" fn ep4_in_cb(t: *mut usb_transfer_t) {
             let printed = mk1::input::pad_number(raw);
             let prev = s.pads[raw as usize];
             if pressure.abs_diff(prev) >= 128 || (pressure == 0 && prev != 0) {
-                log::info!("pad {} pressure {}", printed, pressure);
+                // debug, not info: blocking UART writes on the pad hot path
+                // cost milliseconds per line at 115200 baud.
+                log::debug!("pad {} pressure {}", printed, pressure);
                 s.pads[raw as usize] = pressure;
             }
             let sent = s.pads_sent[raw as usize];

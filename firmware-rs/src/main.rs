@@ -6,7 +6,9 @@
 mod config;
 mod osc;
 mod portal;
+mod profile;
 mod usb;
+mod web;
 
 use esp_idf_svc::{
     eventloop::EspSystemEventLoop,
@@ -56,7 +58,8 @@ fn main() -> anyhow::Result<()> {
         (false, Some(cfg)) => match join_sta(&mut wifi, &cfg) {
             Ok(()) => {
                 log::info!("on {}, OSC target {}:{}", cfg.ssid, cfg.target_ip, cfg.target_port);
-                osc::start(&cfg.target_ip, cfg.target_port, led_tx)?;
+                osc::start(&cfg, nvs.clone(), led_tx)?;
+                let _server = web::serve(nvs)?;
                 loop {
                     std::thread::sleep(std::time::Duration::from_secs(60));
                 }
@@ -86,5 +89,12 @@ fn join_sta(wifi: &mut BlockingWifi<EspWifi<'static>>, cfg: &Config) -> anyhow::
     wifi.start()?;
     wifi.connect()?; // errors out on bad creds after esp-idf's internal retries
     wifi.wait_netif_up()?;
+    // esp-idf defaults to modem power save, which adds 30–300 ms of latency
+    // jitter to every packet — a controller can't live with that.
+    unsafe {
+        esp_idf_svc::sys::esp!(esp_idf_svc::sys::esp_wifi_set_ps(
+            esp_idf_svc::sys::wifi_ps_type_t_WIFI_PS_NONE
+        ))?;
+    }
     Ok(())
 }
