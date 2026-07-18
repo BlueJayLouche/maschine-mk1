@@ -115,6 +115,39 @@ impl Display {
         &mut self.buf
     }
 
+    /// Send the whole framebuffer in messages that each fit one full-speed
+    /// USB packet (64 bytes). The Mk1 delimits EP 0x08 messages on packet
+    /// boundaries: at high speed a 500-byte message is one packet, but at
+    /// full speed it would be split and misparsed (hardware-verified: noise
+    /// on the panels). Same wire format as [`send_frame`], smaller chunks.
+    pub fn send_frame_fs<E>(
+        &self,
+        display: u8,
+        mut write: impl FnMut(&[u8]) -> Result<(), E>,
+    ) -> Result<(), E> {
+        const FIRST: usize = 60; // 64 - [d, len_be16, 0x5C]
+        const CONT: usize = 61; // 64 - [d|1, len_be16]
+        let d = display << 1;
+        write(&[d, 0x00, 0x03, 0x75, 0x00, 0x3F])?; // row window 0–63
+        write(&[d, 0x00, 0x03, 0x15, 0x00, 0x54])?; // col window 0–84 (×3 px)
+
+        let mut msg = [0u8; 64];
+        let len = (1 + FIRST) as u16;
+        msg[..4].copy_from_slice(&[d, (len >> 8) as u8, len as u8, 0x5C]);
+        msg[4..4 + FIRST].copy_from_slice(&self.buf[..FIRST]);
+        write(&msg[..4 + FIRST])?;
+
+        let mut offset = FIRST;
+        while offset < BUF_SIZE {
+            let n = CONT.min(BUF_SIZE - offset);
+            msg[..3].copy_from_slice(&[d | 1, (n >> 8) as u8, n as u8]);
+            msg[3..3 + n].copy_from_slice(&self.buf[offset..offset + n]);
+            write(&msg[..3 + n])?;
+            offset += n;
+        }
+        Ok(())
+    }
+
     /// Send the whole framebuffer to `display` (0 or 1) as EP 0x08 messages.
     pub fn send_frame<E>(
         &self,
@@ -187,6 +220,26 @@ mod tests {
         assert_eq!(sizes[2], (2, 4 + CHUNK)); // d = display<<1
         assert_eq!(sizes[3], (3, 3 + CHUNK)); // continuation d|1
         assert_eq!(sizes.last(), Some(&(3, 3 + LAST_CHUNK)));
+        assert_eq!(total, BUF_SIZE);
+    }
+
+    #[test]
+    fn fs_frame_chunking() {
+        let disp = Display::new();
+        let mut total = 0usize;
+        let mut count = 0usize;
+        disp.send_frame_fs(0, |m| {
+            assert!(m.len() <= 64, "message exceeds FS packet: {}", m.len());
+            if count >= 2 {
+                let hdr = if count == 2 { 4 } else { 3 };
+                let len = u16::from_be_bytes([m[1], m[2]]) as usize;
+                assert_eq!(len, m.len() - 3);
+                total += m.len() - hdr;
+            }
+            count += 1;
+            Ok::<(), ()>(())
+        })
+        .unwrap();
         assert_eq!(total, BUF_SIZE);
     }
 

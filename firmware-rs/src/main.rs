@@ -5,6 +5,7 @@
 
 mod config;
 mod portal;
+mod usb;
 
 use esp_idf_svc::{
     eventloop::EspSystemEventLoop,
@@ -22,6 +23,9 @@ fn main() -> anyhow::Result<()> {
     let peripherals = Peripherals::take()?;
     let sysloop = EspSystemEventLoop::take()?;
     let nvs = EspDefaultNvsPartition::take()?;
+
+    // Mk1 session runs regardless of WiFi/portal state.
+    usb::start()?;
 
     let mut wifi = BlockingWifi::wrap(
         EspWifi::new(peripherals.modem, sysloop.clone(), Some(nvs.clone()))?,

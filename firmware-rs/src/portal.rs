@@ -119,6 +119,8 @@ fn offer_dns_over_dhcp(
     use esp_idf_svc::sys::*;
     let netif = wifi.wifi().ap_netif().handle();
     unsafe {
+        // dhcps rejects option changes while running — stop, set, restart.
+        let _ = esp_netif_dhcps_stop(netif);
         let mut dns = esp_netif_dns_info_t::default();
         dns.ip.u_addr.ip4.addr = u32::from_ne_bytes(ip.octets());
         dns.ip.type_ = 0; // ESP_IPADDR_TYPE_V4
@@ -135,6 +137,7 @@ fn offer_dns_over_dhcp(
             &mut opt as *mut _ as *mut core::ffi::c_void,
             1,
         ))?;
+        esp!(esp_netif_dhcps_start(netif))?;
     }
     Ok(())
 }

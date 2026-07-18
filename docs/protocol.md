@@ -124,8 +124,13 @@ NI never implemented other-speed descriptors. In reality:
   then rewrite the host's cached config descriptor in place (it is plain RAM)
   so the interface reads as alt 1 with EP 0x84 IN / 0x08 OUT (bulk, MPS 64),
   and claim "alt 1" through the normal API. Pad pressure then streams at full
-  resolution (0–4095, reports every 2–10 ms) with no bus errors. Displays are
-  claimable the same way but the blit path is untested at FS.
+  resolution (0–4095, reports every 2–10 ms) with no bus errors.
+- **Displays work at FS with re-chunked messages.** EP 0x08 message framing is
+  USB *packet* boundaries: at FS every message must fit one 64-byte packet or
+  the device misparses the split (hardware-verified: noise on the panels).
+  Use ≤60/61-byte data chunks (`send_frame_fs` in mk1-protocol) — same wire
+  format, smaller chunks. Full-frame blit ≈ 300 ms per panel; live UIs should
+  use row/column windows for partial updates.
 
 ## Power
 

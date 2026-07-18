@@ -104,7 +104,7 @@ impl Default for LedState {
 }
 
 impl LedState {
-    pub fn new() -> Self {
+    pub const fn new() -> Self {
         LedState {
             state: [0; 64],
             dirty: [true; 2], // force initial sync
