@@ -54,7 +54,8 @@ LEDS.update({
     "note_repeat": 57, "backlight": 58,
 })
 LEDS.update({f"group_{c}": 33 + i for i, c in enumerate("abcdefgh")})
-LEDS.update({f"softkey{i}": 48 + i for i in range(1, 9)})
+# softkey LED numids run right-to-left (49 = softkey 8), like the input bits
+LEDS.update({f"softkey{i}": 57 - i for i in range(1, 9)})
 
 
 def osc(addr, val):
