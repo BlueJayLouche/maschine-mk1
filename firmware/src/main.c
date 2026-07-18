@@ -20,6 +20,8 @@ static const char *TAG = "mk1";
 
 #define MK1_VID 0x17cc
 #define MK1_PID 0x0808
+#define EP_PADS 0x84
+#define EP_DISPLAY 0x08
 
 #define CMD_GET_DEVICE_INFO 0x01
 #define CMD_READ_ERP 0x02
@@ -257,20 +259,31 @@ static void attach_mk1(void)
     ep4_in->num_bytes = 512;
     ep4_in->callback = ep4_in_cb;
 
-    /* At full speed the Mk1 may present a different config descriptor than
-     * the high-speed layout in docs/protocol.md (512-byte bulk EPs are
-     * illegal at FS) — dump what it actually offers before claiming. */
+    /* At full speed the Mk1 serves a truncated, spec-illegal config: alt 0
+     * only, just EP 0x01/0x81, both still claiming MPS 512 (illegal at FS —
+     * the wire max is 64). NI never implemented other-speed descriptors, but
+     * the device still honours SET_INTERFACE(1) and serves the pad/display
+     * EPs. The host stack only ever validates against its RAM-cached copy of
+     * the descriptor, so: clamp the MPS to 64, claim alt 0 for the command
+     * EPs, then rewrite the cache in place to describe the undeclared pad
+     * (0x84 IN) and display (0x08 OUT) EPs as "alt 1" and claim that too. */
     const usb_config_desc_t *cfg;
+    usb_intf_desc_t *ifd = NULL;
+    usb_ep_desc_t *eps[4];
+    int n_eps = 0;
     if (usb_host_get_active_config_descriptor(dev, &cfg) == ESP_OK) {
         usb_print_config_descriptor(cfg, NULL);
-        /* FS fallback: the Mk1 serves its HS descriptors verbatim — 512-byte
-         * bulk MPS is illegal at full speed and the DWC host rejects it. The
-         * wire MPS at FS is 64 by physics, so patch the host's cached
-         * descriptor (it's RAM, read from the device at enumeration) so the
-         * claim/pipe-alloc paths see the truth. */
         int off = 0;
         const usb_standard_desc_t *d = (const usb_standard_desc_t *)cfg;
         while ((d = usb_parse_next_descriptor_of_type(
+                    d, cfg->wTotalLength, USB_B_DESCRIPTOR_TYPE_INTERFACE, &off)) != NULL) {
+            ifd = (usb_intf_desc_t *)d;
+            break;
+        }
+        off = 0;
+        d = (const usb_standard_desc_t *)cfg;
+        while (n_eps < 4 &&
+               (d = usb_parse_next_descriptor_of_type(
                     d, cfg->wTotalLength, USB_B_DESCRIPTOR_TYPE_ENDPOINT, &off)) != NULL) {
             usb_ep_desc_t *ep = (usb_ep_desc_t *)d;
             if (ep->wMaxPacketSize > 64) {
@@ -278,16 +291,32 @@ static void attach_mk1(void)
                          ep->bEndpointAddress, ep->wMaxPacketSize);
                 ep->wMaxPacketSize = 64;
             }
+            eps[n_eps++] = ep;
         }
     }
 
-    esp_err_t err = usb_host_interface_claim(client, dev, 0, 1);
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "claim iface 0 alt 1: %s — trying alt 0", esp_err_to_name(err));
+    bool fs_truncated = (n_eps == 2 && ifd != NULL);
+    esp_err_t err;
+    if (fs_truncated) {
         err = usb_host_interface_claim(client, dev, 0, 0);
+        if (err == ESP_OK) {
+            ifd->bAlternateSetting = 1;
+            for (int i = 0; i < 2; i++)
+                eps[i]->bEndpointAddress =
+                    (eps[i]->bEndpointAddress & 0x80) ? EP_PADS : EP_DISPLAY;
+            err = usb_host_interface_claim(client, dev, 0, 1);
+            if (err == ESP_OK)
+                ESP_LOGI(TAG, "pad/display EPs claimed via synthesized alt 1");
+            else
+                ESP_LOGE(TAG, "synthesized alt 1 claim failed: %s (pads/displays dead)",
+                         esp_err_to_name(err));
+            err = ESP_OK; /* command session can still run */
+        }
+    } else {
+        err = usb_host_interface_claim(client, dev, 0, 1);
     }
     if (err != ESP_OK) {
-        ESP_LOGE(TAG, "claim iface 0 alt 0 also failed: %s — descriptor above is the clue",
+        ESP_LOGE(TAG, "interface claim failed: %s — descriptor above is the clue",
                  esp_err_to_name(err));
         return;
     }

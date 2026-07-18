@@ -119,9 +119,13 @@ NI never implemented other-speed descriptors. In reality:
 - `SET_INTERFACE(0, alt 1)` is **accepted** despite alt 1 being undescribed,
   and the full EP1 session runs: GET_DEVICE_INFO, AUTO_MSG, knob/button
   reports, LEDs.
-- EP 0x84 (pads) and EP 0x08 (displays) are absent from the FS descriptor;
-  whether the device still serves them on the wire is untested — a host-stack
-  patch is needed to open pipes on undescribed endpoints.
+- EP 0x84 (pads) and EP 0x08 (displays) are absent from the FS descriptor but
+  the device **still serves them on the wire**. Verified recipe: claim alt 0,
+  then rewrite the host's cached config descriptor in place (it is plain RAM)
+  so the interface reads as alt 1 with EP 0x84 IN / 0x08 OUT (bulk, MPS 64),
+  and claim "alt 1" through the normal API. Pad pressure then streams at full
+  resolution (0–4095, reports every 2–10 ms) with no bus errors. Displays are
+  claimable the same way but the blit path is untested at FS.
 
 ## Power
 
