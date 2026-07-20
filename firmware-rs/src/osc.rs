@@ -178,6 +178,8 @@ struct Engine {
     slot: u8,
     bank: usize,
     shift: bool,
+    /// Control ("MIDI" on the silkscreen) held — the profile-switch modifier.
+    ctrl: bool,
     nvs: EspDefaultNvsPartition,
     led_tx: mpsc::SyncSender<(Led, u8)>,
     /// Last raw 0–999 per physical knob 1–8, for delta integration.
@@ -220,10 +222,18 @@ impl Engine {
                         }
                         None => 0,
                     };
+                    let key = format!("{}/knob/{}", bank_letter(self.bank), i + 1);
+                    let e = self.profile.map.get(&key);
+                    let scale = e.and_then(|e| e.scale).unwrap_or(1.0) as f32;
+                    // mode "wrap": wrapping position, so delta-deriving hosts
+                    // (vp404 trim) keep endless travel — the clamped virtual
+                    // position dies at its rails.
+                    let wrap = matches!(e.and_then(|e| e.mode.as_deref()), Some("wrap"));
                     let v = &mut self.virt[self.bank][i];
-                    *v = (*v + d as f32 / 999.0).clamp(0.0, 1.0);
+                    *v = *v + d as f32 * scale / 999.0;
+                    *v = if wrap { v.rem_euclid(1.0) } else { v.clamp(0.0, 1.0) };
                     let v = *v;
-                    self.emit(format!("{}/knob/{}", bank_letter(self.bank), i + 1), v);
+                    self.emit(key, v);
                 } else {
                     let name = ["volume", "tempo", "swing"][i - 8];
                     self.emit(name.to_string(), raw as f32 / 999.0);
@@ -243,16 +253,23 @@ impl Engine {
     }
 
     fn on_button(&mut self, b: Button, down: bool) {
-        if b == Button::Shift {
-            self.shift = down;
+        if b == Button::Shift || b == Button::Control {
+            if b == Button::Shift {
+                self.shift = down;
+            } else {
+                self.ctrl = down;
+            }
             self.paint_groups();
         }
         if let Some(g) = group_index(b) {
+            // Bare group presses are inert — far too easy to hit live.
+            // Shift+group = bank, MIDI(Control)+group = profile: two-finger
+            // chords both; shift wins if both modifiers are down.
             if down {
                 if self.shift {
-                    self.set_slot(g as u8);
-                } else {
                     self.set_bank(g);
+                } else if self.ctrl {
+                    self.set_slot(g as u8);
                 }
             }
             return; // never forwarded — reserved bank/profile selectors
@@ -324,9 +341,14 @@ impl Engine {
         }
     }
 
-    /// Group LEDs: active bank normally, active profile while shift is held.
+    /// Group LEDs: active bank normally, active profile while MIDI (the
+    /// profile-switch modifier) is held.
     fn paint_groups(&self) {
-        let lit = if self.shift { self.slot as usize } else { self.bank };
+        let lit = if self.ctrl && !self.shift {
+            self.slot as usize
+        } else {
+            self.bank
+        };
         for g in 0..8 {
             let _ = self
                 .led_tx
@@ -411,6 +433,7 @@ pub fn start(
         slot: 0,
         bank: 0,
         shift: false,
+        ctrl: false,
         nvs,
         led_tx,
         prev_raw: [None; 8],

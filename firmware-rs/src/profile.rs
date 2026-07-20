@@ -39,6 +39,18 @@ pub struct Profile {
 pub struct Entry {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub osc: Option<String>,
+    /// Knobs only. `"wrap"` sends a wrapping position (never clamped) instead
+    /// of the rail-clamped virtual one — for hosts that derive relative
+    /// deltas (vp404 trim knobs).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mode: Option<String>,
+    /// Knobs only: sensitivity, default 1.0 (one revolution = full range).
+    /// E.g. 0.15 ≈ frame-accurate trim on a 1200-frame clip (the minimum
+    /// published knob step is 5/999 of a revolution). f64 not f32: serde's
+    /// f32 primitive path trips an LLVM Xtensa ISel crash (PCREL_WRAPPER on
+    /// an f32 constant pool) in the esp toolchain — cast at the use site.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scale: Option<f64>,
     /// Incoming OSC address (on :9001) that drives this control's LED.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub led_source: Option<String>,

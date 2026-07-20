@@ -25,12 +25,16 @@ textarea{width:100%;font-family:monospace;font-size:.85em;margin:.8em 0}
 <button onclick=save()>Save slot</button>
 <button onclick=activate()>Activate slot</button>
 <span id=msg></span>
-<p>Sparse JSON: <code>{"name","target"?,"sync"?,"map":{"a/pad/1":{"osc","led_source"?,"label"?}}}</code>.
+<p>Sparse JSON: <code>{"name","target"?,"sync"?,"map":{"a/pad/1":{"osc","led_source"?,"label"?,"mode"?,"scale"?}}}</code>.
+Knobs may set <code>"mode":"wrap"</code> to send a wrapping position (for
+hosts deriving relative deltas) instead of the clamped virtual one, and
+<code>"scale"</code> for sensitivity (default 1.0 = one revolution, full range).
 Keys: <code>&lt;a-h&gt;/pad/1-16</code>, <code>&lt;a-h&gt;/knob/1-8</code>,
 <code>&lt;a-h&gt;/softkey/1-8</code>, <code>volume|tempo|swing</code>,
 <code>button/&lt;name&gt;</code>. Unmapped controls use
 <code>/maschine/&lt;key&gt;</code>; an entry without <code>osc</code> is silent.
-Switch on the unit: hold Shift + group button.</p>
+On the unit: Shift+group = bank, MIDI+group = profile (bare group presses
+do nothing — too easy to hit mid-set).</p>
 <script>"#;
 
 // Injected between head and tail: `let names=[...],active=N;`

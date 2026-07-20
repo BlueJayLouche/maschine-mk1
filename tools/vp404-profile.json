@@ -3,10 +3,14 @@
  "sync": "/rustjay/sync",
  "map": {
   "a/knob/1": {
-   "osc": "/rustjay/pad/in_point"
+   "osc": "/rustjay/pad/in_point",
+   "mode": "wrap",
+   "scale": 0.15
   },
   "a/knob/2": {
-   "osc": "/rustjay/pad/out_point"
+   "osc": "/rustjay/pad/out_point",
+   "mode": "wrap",
+   "scale": 0.15
   },
   "button/rec": {
    "osc": "/rustjay/transport/record",
@@ -93,6 +97,9 @@
   "a/pad/16": {
    "osc": "/rustjay/pads/pad15_trig",
    "led_source": "/rustjay/pads/pad15_loaded"
+  },
+  "button/grid": {
+   "osc": "/rustjay/transport/loop_toggle"
   }
  }
 }

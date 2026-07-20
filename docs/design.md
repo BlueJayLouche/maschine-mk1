@@ -19,6 +19,12 @@ The 8 group buttons are **reserved** bank selectors; group = one global page
 switching pads + knobs 1–8 + softkeys together. Volume/tempo/swing and the
 labeled buttons stay global. Bank = MIDI channel 1–8.
 
+Revised 2026-07-20 (bench: bare group presses are far too easy to hit
+mid-set): a bare group press is **inert** — bank switch is **Shift+group**,
+profile switch is **MIDI(Control)+group** (two-finger chords both; a
+three-key chord proved unplayable). Group LEDs show the active bank, or the
+active profile while MIDI is held.
+
 Logical control surface per profile: **128 pad slots, 64 knob slots,
 64 softkey slots, ~25 global buttons, 3 global knobs.**
 
@@ -41,6 +47,18 @@ slot** (RAM only, starts at 0; one physical revolution ≈ full range) and sends
 absolute values. Known ceiling: positions go stale if the host changes a param
 elsewhere; the fix is **rustjay OSC-out** (planned host-side work, also the
 channel for LED/screen feedback), not device rework.
+
+The virtual position **clamps at its rails**, which kills relative-delta
+derivation on the host side — so a profile map entry may set
+`"mode": "wrap"` (2026-07-18) to send a wrapping position instead (0–1,
+rollover, never clamped). That is the contract vp404's trim knobs consume
+(wrap-corrected deltas, rustjay `3ac36ce`); the shim and pre-profile firmware
+always sent it, and the clamped virtual briefly broke it. Map entries may
+also set `"scale"` (default 1.0 = one revolution ≈ full range): the published
+position advances at `delta × scale`, so e.g. 0.15 makes the minimum knob
+step (5/999 of a revolution, set by the ERP jitter deadband) ≈ 1 frame on a
+1200-frame clip. Sensitivity lives here, per profile — not in the host and
+not in the deadband, which stays at the kernel-proven value.
 
 ## MIDI map defaults (per-control overridable)
 
@@ -91,8 +109,8 @@ freeze-screens-while-playing flag.
   `osc-feedback` channel pushes registered param values on change (plus a full
   dump on `/rustjay/sync`), and a matching address drives the LED float 0–1.
   E.g. vp404 publishes `pad<i>_loaded` and `rec_state` params for exactly this.
-- Switch: **hold shift + group button**; group LEDs show profiles while shift
-  is held.
+- Switch: **hold MIDI(Control) + group button** (revised 2026-07-20, was
+  shift+group); group LEDs show profiles while MIDI is held.
 - Editing: device web page — download/upload/paste profile JSON, name + target
   as form fields. No graphical mapping editor in v1.
 - Implemented 2026-07-18 (`firmware-rs`: profile.rs/osc.rs/web.rs), with two
